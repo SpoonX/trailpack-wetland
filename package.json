@@ -1,0 +1,27 @@
+{
+  "name": "trailpack-wetland",
+  "version": "0.0.1",
+  "description": "Wetland ORM Trailpack https://wetland.spoonx.org",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/SpoonX/trailpack-wetland.git"
+  },
+  "keywords": [
+    "trails",
+    "wetland",
+    "orm",
+    "mysql",
+    "sqlite",
+    "postgres"
+  ],
+  "author": "RWOverdijk <wesley@spoonx.nl>",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/SpoonX/trailpack-wetland/issues"
+  },
+  "homepage": "https://github.com/SpoonX/trailpack-wetland#readme"
+}
