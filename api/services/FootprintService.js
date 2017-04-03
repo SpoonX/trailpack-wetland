@@ -1,7 +1,8 @@
 'use strict';
 
-const Service = require('trails-service');
-const util    = require('util');
+const Service     = require('trails-service');
+const EntityError = require('../../lib').EntityError;
+const util        = require('util');
 
 /**
  * @module FootprintService
@@ -23,7 +24,7 @@ module.exports = class FootprintService extends Service {
     let entity  = manager.getEntity(modelName);
 
     if (!entity) {
-      return this.app.log.error(`No registered entity found for ${modelName}`);
+      return Promise.reject(new EntityError('E_NOT_FOUND', `No registered entity found for ${modelName}`));
     }
 
     let newRecord = this.app.orm.getPopulator(manager).assign(entity, values, null, options);
@@ -72,7 +73,7 @@ module.exports = class FootprintService extends Service {
 
     return find.then(result => {
       if (!result) {
-        return this.app.log.info(`No record found with the specified criteria.`);
+        return Promise.reject(new EntityError('E_NOT_FOUND', 'No record found with the specified criteria.'));
       }
 
       options.recursive = options.recursive || 1;
@@ -130,25 +131,25 @@ module.exports = class FootprintService extends Service {
     let parent  = manager.getEntities()[parentModelName];
 
     if (!parent) {
-      return this.app.log.info('Parent entity not found or not yet registered');
+      return Promise.reject(new EntityError('E_NOT_FOUND', `Entity '${parentModelName}' not found.`));
     }
 
     let relation = parent.mapping.getRelation(childAttributeName);
 
     if (!relation) {
-      return this.app.log.error(`Missing required relationship: ${childAttributeName}`);
+      return Promise.reject(new EntityError('E_NOT_FOUND', `Association ${childAttributeName} not found.`));
     }
 
     let childEntity = manager.getEntity(relation.targetEntity);
 
     if (!childEntity) {
-      return this.app.log.error(`Entity '${relation.targetEntity}' not found or not yet registered.`);
+      return Promise.reject(new EntityError('E_NOT_FOUND', `Entity '${relation.targetEntity}' not found.`));
     }
 
     return manager.getRepository(parent.entity).findOne(parentId, {populate: childAttributeName})
       .then(result => {
         if (!result) {
-          return this.app.log.error('Parent record not found');
+          return Promise.reject(new EntityError('E_NOT_FOUND', 'No record found with the specified criteria.'));
         }
 
         let recursive = options && options.recursive ? options.recursive : 1;
@@ -181,13 +182,13 @@ module.exports = class FootprintService extends Service {
     let parentPk = parent.mapping.getPrimaryKey();
 
     if (!parent) {
-      return this.app.log.info('Parent entity not found or not yet registered');
+      return Promise.reject(new EntityError('E_NOT_FOUND', `Entity '${parentModelName}' not found.`));
     }
 
     let relation = parent.mapping.getRelation(childAttributeName);
 
     if (!relation) {
-      return this.app.log.error(`Missing required relationship: ${childAttributeName}`);
+      return Promise.reject(new EntityError('E_NOT_FOUND', `Association ${childAttributeName} not found.`));
     }
 
     let child             = manager.getEntities()[relation.targetEntity];
@@ -220,9 +221,11 @@ module.exports = class FootprintService extends Service {
    * @returns {Promise.<T>}
    */
   updateAssociation(parentModelName, parentId, childAttributeName, criteria, values, options = {}) {
-    if (!values) {
-      return this.app.log.error('Missing values to update.');
-    }
+    return this.findAssociation(parentModelName, parentId, childAttributeName, criteria, options)
+      .then(result => {
+        if (!result) {
+          return Promise.reject(new EntityError('E_NOT_FOUND', 'No record found with the specified criteria.'));
+        }
 
     return this.findAssociation(parentModelName, parentId, childAttributeName, criteria, options).then(result => {
       result            = result[0];
@@ -255,13 +258,11 @@ module.exports = class FootprintService extends Service {
    * @returns {Promise.<T>}
    */
   destroyAssociation(parentModelName, parentId, childAttributeName, criteria, options) {
-    return this.findAssociation(parentModelName, parentId, childAttributeName, criteria, options).then(result => {
-      if (!result) {
-        return this.app.log.info('No record found with the specified criteria.');
-      }
-
-      result      = result[0];
-      let manager = this.app.orm.getManager();
+    return this.findAssociation(parentModelName, parentId, childAttributeName, criteria, options)
+      .then(result => {
+        if (!result) {
+          return Promise.reject(new EntityError('E_NOT_FOUND', 'No record found with the specified criteria.'));
+        }
 
       Array.isArray(result[childAttributeName])
         ? result[childAttributeName].map(child => manager.remove(child))
