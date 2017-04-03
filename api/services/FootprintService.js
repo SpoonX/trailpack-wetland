@@ -5,10 +5,19 @@ const util    = require('util');
 
 /**
  * @module FootprintService
- * @description TODO document Service
+ * @description Footprint service using Wetland ORM
  */
 module.exports = class FootprintService extends Service {
 
+  /**
+   * Creates a new record
+   *
+   * @param {string} modelName
+   * @param {{}}     values
+   * @param {{}}     [options]
+   *
+   * @returns {Promise.<T>}
+   */
   create(modelName, values, options) {
     let manager = this.app.orm.getManager();
     let entity  = manager.getEntity(modelName);
@@ -17,78 +26,105 @@ module.exports = class FootprintService extends Service {
       return this.app.log.error(`No registered entity found for ${modelName}`);
     }
 
-    let newRecord = this.app.orm.getPopulator(manager).assign(entity, values, null, true);
+    let newRecord = this.app.orm.getPopulator(manager).assign(entity, values, null, options);
 
-    manager.persist(newRecord).flush()
-      .then(result => this.app.log.info(`New record created: ${util.inspect(newRecord, false, 8)}`))
-      .catch(this.app.log.error);
+    return manager.persist(newRecord).flush().then(() => newRecord);
   }
 
+  /**
+   * Find all records that satisfy the given criteria.
+   * If a primary key is given, the return value will be a single Object instead of an Array.
+   *
+   * @param {string}           modelName
+   * @param {{}|string|number} criteria
+   * @param {{}}               [options]
+   *
+   * @returns {Promise.<T>}
+   */
   find(modelName, criteria, options) {
     let manager = this.app.orm.getManager();
 
-    manager.getRepository(modelName).find(criteria, options)
-      .then(records => {
-        if (!records) {
-          return this.app.log.info('No records found.');
-        }
+    if (typeof criteria === 'string' || typeof criteria === 'number') {
+      return manager.getRepository(modelName).findOne(criteria, options);
+    }
 
-        this.app.log.info(records);
-      })
-      .catch(this.app.log.error);
+    return manager.getRepository(modelName).find(criteria, options);
   }
 
-  findOne(modelName, criteria, options) {
-    let manager = this.app.orm.getManager();
+  /**
+   * Update one or multiple records depending on the type of given criteria.
+   *
+   * @param {string}           modelName
+   * @param {{}|string|number} criteria
+   * @param {{}}               values
+   * @param {{}}               [options]
+   *
+   * @returns {Promise.<T>}
+   */
+  update(modelName, criteria, values, options = {}) {
+    let manager    = this.app.orm.getManager();
+    let populator  = this.app.orm.getPopulator(manager);
+    let entity     = manager.getEntity(modelName);
+    let repository = manager.getRepository(modelName);
+    let find       = typeof criteria === 'string' || typeof criteria === 'number'
+      ? repository.findOne(criteria, options)
+      : repository.find(criteria, options);
 
-    manager.getRepository(modelName).findOne(criteria, options)
-      .then(records => {
-        if (!records) {
-          return this.app.log.info('No record found.');
-        }
+    return find.then(result => {
+      if (!result) {
+        return this.app.log.info(`No record found with the specified criteria.`);
+      }
 
-        this.app.log.info(records);
-      })
-      .catch(this.app.log.error);
+      options.recursive = options.recursive || 1;
+
+      Array.isArray(result)
+        ? result.map(result => populator.assign(entity, values, result, options.recursive))
+        : populator.assign(entity, values, result, options.recursive);
+
+      return manager.flush();
+    });
   }
 
-  update(modelName, criteria, values, options, recursive) {
-    let manager   = this.app.orm.getManager();
-    let populator = this.app.orm.getPopulator(manager);
-    let entity    = manager.getEntity(modelName);
-
-    populator.findDataForUpdate(criteria, entity, options)
-      .then(base => {
-        if (!base) {
-          return this.app.log.info(`No record found with the specified criteria.`);
-        }
-
-        if (typeof recursive === 'undefined') {
-          recursive = true;
-        }
-
-        populator.assign(entity, values, base, recursive);
-
-        return manager.flush().then(this.app.log.info(util.inspect(base, false, 8)));
-      })
-      .catch(this.app.log.error);
-  }
-
+  /**
+   * Delete one or multiple records depending on the type of given criteria.
+   *
+   * @param {string}           modelName
+   * @param {{}|string|number} criteria
+   * @param {{}}               options
+   *
+   * @returns {Promise<T>|Promise.<Object>}
+   */
   destroy(modelName, criteria, options) {
-    let manager = this.app.orm.getManager();
+    let manager    = this.app.orm.getManager();
+    let repository = manager.getRepository(modelName);
+    let find       = typeof criteria === 'string' || typeof criteria === 'number'
+      ? repository.findOne(criteria, options)
+      : repository.find(criteria, options);
 
-    manager.getRepository(modelName).findOne(criteria, options)
-      .then(record => {
-        if (!record) {
-          return this.app.log.error('No record found with the specified criteria.');
-        }
+    return find.then(result => {
+      if (!result) {
+        return this.app.log.error('No record found with the specified criteria.');
+      }
 
-        return manager.remove(record).flush()
-          .then(this.app.log.info('Record removed.'));
-      })
-      .catch(this.app.log.error);
+      Array.isArray(result)
+        ? result.map(result => manager.remove(result))
+        : manager.remove(result);
+
+      return manager.flush();
+    });
   }
 
+  /**
+   * Create a record and associate it with an existent parent
+   *
+   * @param {string}        parentModelName
+   * @param {string|number} parentId
+   * @param {string}        childAttributeName
+   * @param {{}}            values
+   * @param {{}}            [options]
+   *
+   * @returns {Promise<T>|Promise.<Object>}
+   */
   createAssociation(parentModelName, parentId, childAttributeName, values, options) {
     let manager = this.app.orm.getManager();
     let parent  = manager.getEntities()[parentModelName];
@@ -97,45 +133,52 @@ module.exports = class FootprintService extends Service {
       return this.app.log.info('Parent entity not found or not yet registered');
     }
 
-    let mapping  = parent.mapping;
-    let relation = mapping.getRelation(childAttributeName);
+    let relation = parent.mapping.getRelation(childAttributeName);
 
     if (!relation) {
       return this.app.log.error(`Missing required relationship: ${childAttributeName}`);
     }
 
-    let ChildEntity = manager.getEntity(relation.targetEntity);
+    let childEntity = manager.getEntity(relation.targetEntity);
 
-    if (!ChildEntity) {
+    if (!childEntity) {
       return this.app.log.error(`Entity '${relation.targetEntity}' not found or not yet registered.`);
     }
 
-    let child = new ChildEntity();
-
-    Object.assign(child, values);
-    manager.persist(child);
-
-    child = Promise.resolve(child);
-
-
-    child.then(resolvedChild => {
-      let entity = manager.getEntity(parentModelName);
-
-      return manager.getRepository(entity).findOne(parentId, {populate: childAttributeName}).then(result => {
+    return manager.getRepository(parent.entity).findOne(parentId, {populate: childAttributeName})
+      .then(result => {
         if (!result) {
           return this.app.log.error('Parent record not found');
         }
 
-        result[childAttributeName].add(resolvedChild);
+        let recursive = options && options.recursive ? options.recursive : 1;
+        let child     = this.app.orm.getPopulator(manager).assign(childEntity, values, null, recursive);
 
-        return manager.flush().then(() => this.app.log.info(result));
+        result[childAttributeName].add(child);
+
+        return manager.flush().then(() => result);
       });
-    }).catch(this.app.log.error);
   }
 
-  findAssociation(parentModelName, parentId, childAttributeName, criteria = {}, options) {
-    let manager = this.app.orm.getManager();
-    let parent  = manager.getEntities()[parentModelName];
+  /**
+   *
+   * Find entity's associations based on given id or criteria
+   *
+   * /parent/:id/child/:id
+   * /parent/:id/child?field=value
+   *
+   * @param {string}        parentModelName
+   * @param {string|number} parentId
+   * @param {string}        childAttributeName
+   * @param {{}}            criteria
+   * @param {{}}            [options]
+   *
+   * @returns {Promise<any>|Promise.<{}[]>}
+   */
+  findAssociation(parentModelName, parentId, childAttributeName, criteria, options = {}) {
+    let manager  = this.app.orm.getManager();
+    let parent   = manager.getEntities()[parentModelName];
+    let parentPk = parent.mapping.getPrimaryKey();
 
     if (!parent) {
       return this.app.log.info('Parent entity not found or not yet registered');
@@ -147,104 +190,85 @@ module.exports = class FootprintService extends Service {
       return this.app.log.error(`Missing required relationship: ${childAttributeName}`);
     }
 
-    return manager.getRepository(parentModelName)
-      .find(parentId, {populate: childAttributeName})
-      .then(result => {
-        if (!result) {
-          return this.app.log.error('No association found');
-        }
+    let child             = manager.getEntities()[relation.targetEntity];
+    let childPk           = child.mapping.getPrimaryKey();
+    let repository        = manager.getRepository(parentModelName);
+    let queryBuilder      = repository.getQueryBuilder('p');
+    let childQueryBuilder = queryBuilder.where({'p': parentId}).populate(childAttributeName);
+    let childAlias        = childQueryBuilder.getAlias();
+    criteria              = typeof criteria === 'string' || typeof criteria === 'number'
+      ? {[childPk]: criteria} : criteria;
 
-        this.app.log.info(result);
-        return result;
-      })
-      .catch(this.app.log.error);
+    repository.applyOptions(childQueryBuilder, options);
+
+    childQueryBuilder.select(childAlias).where(criteria);
+
+    return queryBuilder.getQuery().getResult();
   }
 
-  updateAssociation(parentModelName, parentId, childAttributeName, criteria, values, options) {
-    let manager = this.app.orm.getManager();
-    let parent  = manager.getEntities()[parentModelName];
-
-    if (!parent) {
-      return this.app.log.info('Parent entity not found or not yet registered');
-    }
-
-    let relation = parent.mapping.getRelation(childAttributeName);
-
-    if (!relation) {
-      return this.app.log.error(`Missing required relationship: ${childAttributeName}`);
-    }
-
+  /**
+   *
+   * Update association(s) based on given primary key or criteria
+   *
+   * @param {string}        parentModelName
+   * @param {string|number} parentId
+   * @param {string}        childAttributeName
+   * @param {{}}            criteria
+   * @param {{}}            values
+   * @param {{}}            [options]
+   *
+   * @returns {Promise.<T>}
+   */
+  updateAssociation(parentModelName, parentId, childAttributeName, criteria, values, options = {}) {
     if (!values) {
       return this.app.log.error('Missing values to update.');
     }
 
-    let parentPK        = parent.mapping.getPrimaryKey();
-    let aliasedCriteria = {};
+    return this.findAssociation(parentModelName, parentId, childAttributeName, criteria, options).then(result => {
+      result            = result[0];
+      let manager       = this.app.orm.getManager();
+      let populator     = this.app.orm.getPopulator(manager);
+      let parent        = manager.getEntities()[parentModelName];
+      let relation      = parent.mapping.getRelation(childAttributeName);
+      let childEntity   = manager.getEntity(relation.targetEntity);
+      options.recursive = options.recursive || 1;
 
-    Object.keys(criteria).forEach(key => {
-      aliasedCriteria[`c.${key}`] = criteria[key];
+      let updatedChild = Array.isArray(result[childAttributeName])
+        ? result[childAttributeName].map(child => populator.assign(childEntity, values, child, options.recursive - 1))
+        : populator.assign(childEntity, values, result[childAttributeName], options.recursive - 1);
+
+      populator.assign(parent.entity, {[childAttributeName]: updatedChild}, result, options.recursive);
+
+      return manager.flush().then(() => result);
     });
-
-    Object.assign(aliasedCriteria, {[`p.${parentPK}`]: parentId});
-
-    return manager.getRepository(parentModelName)
-      .getQueryBuilder('p')
-      .select('p', 'c')
-      .innerJoin(childAttributeName, 'c')
-      .where(aliasedCriteria)
-      .getQuery()
-      .getResult()
-      .then(result => {
-        if (!result) {
-          this.app.log.error('No matching association found.');
-        }
-
-        let parentEntity = manager.getEntity(parentModelName);
-        let data         = Object.assign(new parentEntity(), result[0]);
-
-        Object.assign(data[childAttributeName][0], values);
-
-        manager.flush().then(this.app.log.info('Association updated.'));
-      })
-      .catch(this.app.log.error);
   }
 
+  /**
+   * Destroy association(s) based on given primary key or criteria
+   *
+   * @param {string}        parentModelName
+   * @param {string|number} parentId
+   * @param {string}        childAttributeName
+   * @param {{}}            criteria
+   * @param {{}}            [options]
+   *
+   * @returns {Promise.<T>}
+   */
   destroyAssociation(parentModelName, parentId, childAttributeName, criteria, options) {
-    let manager = this.app.orm.getManager();
-    let parent  = manager.getEntities()[parentModelName];
+    return this.findAssociation(parentModelName, parentId, childAttributeName, criteria, options).then(result => {
+      if (!result) {
+        return this.app.log.info('No record found with the specified criteria.');
+      }
 
-    if (!parent) {
-      return this.app.log.info('Parent entity not found or not yet registered');
-    }
+      result      = result[0];
+      let manager = this.app.orm.getManager();
 
-    let relation = parent.mapping.getRelation(childAttributeName);
+      Array.isArray(result[childAttributeName])
+        ? result[childAttributeName].map(child => manager.remove(child))
+        : manager.remove(result[childAttributeName]);
 
-    if (!relation) {
-      return this.app.log.error(`Missing required relationship: ${childAttributeName}`);
-    }
+      return manager.flush().then(() => result);
 
-    return manager.getRepository(parentModelName).findOne(parentId, {populate: childAttributeName})
-      .then(result => {
-        if (!result) {
-          return this.app.log.error('Record not found.');
-        }
-
-        let properties = Object.keys(criteria);
-        let child      = manager.getEntities()[relation.targetEntity];
-        let childPk    = child.mapping.getPrimaryKey();
-
-        let toRemove = result[childAttributeName].filter(child => {
-          return properties.every(property => child[property] === criteria[property]);
-        })[0];
-
-        return manager.getRepository(relation.targetEntity)
-          .getQueryBuilder()
-          .remove()
-          .where({[childPk]: toRemove[childPk]})
-          .getQuery()
-          .getResult()
-          .then(this.app.log.info('Association destroyed.'));
-      })
-      .catch(this.app.log.error);
-  };
+    });
+  }
 };
