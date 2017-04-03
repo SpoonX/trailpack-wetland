@@ -21,16 +21,13 @@ module.exports = class WetlandTrailpack extends DatastoreTrailpack {
   configure() {
     this.app.config.database.orm = 'wetland';
 
-    let stores       = this.app.config.database.stores;
-    let defaultStore = this.app.config.database.models.defaultStore;
-    let entities     = Object.keys(this.app.api.entities)
-      .map(entity => this.app.api.entities[entity]);
+    let wetlandConfig = this.app.config.wetland;
 
-    this.wetland = new Wetland({
-      stores      : stores,
-      entities    : entities,
-      defaultStore: defaultStore
-    });
+    if (!wetlandConfig) {
+      throw new Error('Wetland config not found. Make sure you have a config file for wetland and try again.');
+    }
+
+    this.wetland = new Wetland(wetlandConfig);
   }
 
   /**
