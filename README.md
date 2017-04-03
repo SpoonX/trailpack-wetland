@@ -1,37 +1,50 @@
 # trailpack-wetland
 
-[![NPM version][npm-image]][npm-url]
-[![Build status][ci-image]][ci-url]
-[![Dependency Status][daviddm-image]][daviddm-url]
-[![Code Climate][codeclimate-image]][codeclimate-url]
-
 Wetland ORM Trailpack https://wetland.spoonx.org
 
-## Install
+## Installation
 
-```sh
-$ npm install --save trailpack-wetland
-```
+1. `npm install --save trailpack-wetland`
+2. Choose an adapter (list below) `npm i --save sqlite3`
+3. `mkdir api/entity`
+4. `touch config/wetland.js`
 
-## Configure
-`$ mkdir entities`
-`$ touch /entities/index.js`
+## Configuration
+Out of the box, wetland works with sqlite3, so there's no need to configure anything.
+An extensive list with config options and explanation can be found in [the wetland documentation](https://wetland.spoonx.org/configuration.html).
+
+### Example config
+The simplest configuration _(which will be what's used 9/10 times)_ is as follows:
+
+**config/wetland.js**
 
 ```js
-// config/main.js
-module.exports = {
-  packs: [
-    // ... other trailpacks
-    require('trailpack-wetland')
-  ] 
-}
+const path = require('path');
+
+module.exports.wetland = {
+  entityPath: path.resolve(process.cwd(), 'api', 'entity'),
+  stores    : {
+    defaultStore: {
+      client    : 'mysql',
+      connection: {
+	    host    : '127.0.0.1',
+	    user    : 'your_database_user',
+	    password: 'your_database_password',
+	    database: 'myapp_test'
+      }
+    }
+  }
+};
 ```
 
-[npm-image]: https://img.shields.io/npm/v/trailpack-wetland.svg?style=flat-square
-[npm-url]: https://npmjs.org/package/trailpack-wetland
-[ci-image]: https://img.shields.io/travis//trailpack-wetland/master.svg?style=flat-square
-[ci-url]: https://travis-ci.org//trailpack-wetland
-[daviddm-image]: http://img.shields.io/david//trailpack-wetland.svg?style=flat-square
-[daviddm-url]: https://david-dm.org//trailpack-wetland
-[codeclimate-image]: https://img.shields.io/codeclimate/github//trailpack-wetland.svg?style=flat-square
-[codeclimate-url]: https://codeclimate.com/github//trailpack-wetland
+### Adapters
+| Adapter | Command |
+| ------------- | ------------- |
+| mysql | `npm i mysql --save` |
+| mysql2 | `npm i mysql2 --save` |
+| pg | `npm i pg --save` |
+| sqlite3 | `npm i sqlite3 --save` |
+| mariasql | `npm i mariasql --save` |
+| strong-oracle | `npm i strong-oracle --save` |
+| oracle | `npm i oracle --save` |
+| mssql | `npm i mssql --save` |
