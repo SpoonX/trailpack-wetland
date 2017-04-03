@@ -13,8 +13,6 @@ module.exports = class WetlandTrailpack extends DatastoreTrailpack {
     if (!this.app.config.database || !this.app.config.database.stores) {
       return this.app.log.logger.warn('No store configured.');
     }
-
-    this.app.log.verbose('Trailpack-wetland is valid');
   }
 
   /**
@@ -33,8 +31,6 @@ module.exports = class WetlandTrailpack extends DatastoreTrailpack {
       entities    : entities,
       defaultStore: defaultStore
     });
-
-    this.app.log.verbose('Trailpack-wetland is configured');
   }
 
   /**
@@ -46,30 +42,26 @@ module.exports = class WetlandTrailpack extends DatastoreTrailpack {
     this.orm     = this.wetland;
     this.app.orm = this.wetland;
 
-    this.app.log.info('Trailpack-wetland is initialized');
-
     let migration = this.app.config.database.models.migrate;
 
-    if (migration) {
-      if (migration === 'safe') {
-        return;
-      }
-
-      if (this.app.config.env !== 'development') {
-        return this.app.log
-          .warn(`Refusing to run dev migrations because environment '${this.app.config.env}' isn't development.`);
-      }
-
-      if (migration !== 'alter') {
-        return this.app.log.warn('Not running dev migrations. The only support method is "alter".');
-      }
-
-      this.app.log.verbose('Starting dev migrations...');
-
-      return this.wetland.getMigrator().devMigrations()
-        .then(() => this.app.log.verbose('Dev migrations complete.'))
-        .catch(error => this.app.log.error(`Dev migrations failed: ${error}`));
+    if (!migration || migration === 'safe') {
+      return;
     }
+
+    if (this.app.config.env !== 'development') {
+      return this.app.log
+        .warn(`Refusing to run dev migrations because environment '${this.app.config.env}' isn't development.`);
+    }
+
+    if (migration !== 'alter') {
+      return this.app.log.warn('Not running dev migrations. The only support method is "alter".');
+    }
+
+    this.app.log.verbose('Starting dev migrations...');
+
+    return this.wetland.getMigrator().devMigrations()
+      .then(() => this.app.log.verbose('Dev migrations complete.'))
+      .catch(error => this.app.log.error(`Dev migrations failed: ${error}`));
   }
 
   constructor(app) {
