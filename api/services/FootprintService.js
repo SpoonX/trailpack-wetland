@@ -20,16 +20,18 @@ module.exports = class FootprintService extends Service {
    * @returns {Promise.<T>}
    */
   create(modelName, values, options) {
-    let manager = this.app.orm.getManager();
-    let entity  = manager.getEntity(modelName);
+    let manager   = this.app.orm.getManager();
+    let populator = this.app.orm.getPopulator(manager);
+    let entity    = manager.getEntity(modelName);
 
     if (!entity) {
       return Promise.reject(new EntityError('E_NOT_FOUND', `No registered entity found for ${modelName}`));
     }
 
-    let newRecord = this.app.orm.getPopulator(manager).assign(entity, values, null, options);
+    let newRecord = populator.assign(entity, values, null, options);
 
-    return manager.persist(newRecord).flush().then(() => newRecord);
+    return manager.persist(newRecord)
+      .flush().then(() => newRecord);
   }
 
   /**
@@ -46,10 +48,12 @@ module.exports = class FootprintService extends Service {
     let manager = this.app.orm.getManager();
 
     if (typeof criteria === 'string' || typeof criteria === 'number') {
-      return manager.getRepository(modelName).findOne(criteria, options);
+      return manager.getRepository(modelName)
+        .findOne(criteria, options);
     }
 
-    return manager.getRepository(modelName).find(criteria, options);
+    return manager.getRepository(modelName)
+      .find(criteria, options);
   }
 
   /**
@@ -82,7 +86,7 @@ module.exports = class FootprintService extends Service {
         ? result.map(result => populator.assign(entity, values, result, options.recursive))
         : populator.assign(entity, values, result, options.recursive);
 
-      return manager.flush();
+      return manager.flush().then(() => result);
     });
   }
 
@@ -104,14 +108,14 @@ module.exports = class FootprintService extends Service {
 
     return find.then(result => {
       if (!result) {
-        return this.app.log.error('No record found with the specified criteria.');
+        return Promise.reject(new EntityError('E_NOT_FOUND', 'No record found with the specified criteria.'));
       }
 
       Array.isArray(result)
         ? result.map(result => manager.remove(result))
         : manager.remove(result);
 
-      return manager.flush();
+      return manager.flush().then(() => result);
     });
   }
 
@@ -128,13 +132,14 @@ module.exports = class FootprintService extends Service {
    */
   createAssociation(parentModelName, parentId, childAttributeName, values, options) {
     let manager = this.app.orm.getManager();
-    let parent  = manager.getEntities()[parentModelName];
+    let parent  = manager.getEntity(parentModelName);
 
     if (!parent) {
       return Promise.reject(new EntityError('E_NOT_FOUND', `Entity '${parentModelName}' not found.`));
     }
 
-    let relation = parent.mapping.getRelation(childAttributeName);
+    let mapping  = manager.getMapping(parentModelName);
+    let relation = mapping.getRelation(childAttributeName);
 
     if (!relation) {
       return Promise.reject(new EntityError('E_NOT_FOUND', `Association ${childAttributeName} not found.`));
@@ -146,7 +151,8 @@ module.exports = class FootprintService extends Service {
       return Promise.reject(new EntityError('E_NOT_FOUND', `Entity '${relation.targetEntity}' not found.`));
     }
 
-    return manager.getRepository(parent.entity).findOne(parentId, {populate: childAttributeName})
+    return manager.getRepository(parent)
+      .findOne(parentId, {populate: childAttributeName})
       .then(result => {
         if (!result) {
           return Promise.reject(new EntityError('E_NOT_FOUND', 'No record found with the specified criteria.'));
@@ -177,28 +183,30 @@ module.exports = class FootprintService extends Service {
    * @returns {Promise<any>|Promise.<{}[]>}
    */
   findAssociation(parentModelName, parentId, childAttributeName, criteria, options = {}) {
-    let manager  = this.app.orm.getManager();
-    let parent   = manager.getEntities()[parentModelName];
-    let parentPk = parent.mapping.getPrimaryKey();
+    let manager = this.app.orm.getManager();
+    let parent  = manager.getEntities(parentModelName);
 
     if (!parent) {
       return Promise.reject(new EntityError('E_NOT_FOUND', `Entity '${parentModelName}' not found.`));
     }
 
-    let relation = parent.mapping.getRelation(childAttributeName);
+    let mapping  = manager.getMapping(parentModelName);
+    let relation = mapping.getRelation(childAttributeName);
 
     if (!relation) {
       return Promise.reject(new EntityError('E_NOT_FOUND', `Association ${childAttributeName} not found.`));
     }
 
-    let child             = manager.getEntities()[relation.targetEntity];
-    let childPk           = child.mapping.getPrimaryKey();
     let repository        = manager.getRepository(parentModelName);
     let queryBuilder      = repository.getQueryBuilder('p');
     let childQueryBuilder = queryBuilder.where({'p': parentId}).populate(childAttributeName);
     let childAlias        = childQueryBuilder.getAlias();
-    criteria              = typeof criteria === 'string' || typeof criteria === 'number'
-      ? {[childPk]: criteria} : criteria;
+
+    if (typeof criteria === 'string' || typeof criteria === 'number') {
+      let childPk = manager.getMapping(relation.targetEntity).getPrimaryKey();
+
+      criteria = {[childPk]: criteria};
+    }
 
     repository.applyOptions(childQueryBuilder, options);
 
@@ -227,23 +235,22 @@ module.exports = class FootprintService extends Service {
           return Promise.reject(new EntityError('E_NOT_FOUND', 'No record found with the specified criteria.'));
         }
 
-    return this.findAssociation(parentModelName, parentId, childAttributeName, criteria, options).then(result => {
-      result            = result[0];
-      let manager       = this.app.orm.getManager();
-      let populator     = this.app.orm.getPopulator(manager);
-      let parent        = manager.getEntities()[parentModelName];
-      let relation      = parent.mapping.getRelation(childAttributeName);
-      let childEntity   = manager.getEntity(relation.targetEntity);
-      options.recursive = options.recursive || 1;
+        result            = result[0];
+        let manager       = this.app.orm.getManager();
+        let populator     = this.app.orm.getPopulator(manager);
+        let parent        = manager.getEntities(parentModelName);
+        let relation      = manager.getMapping(parentModelName).getRelation(childAttributeName);
+        let childEntity   = manager.getEntity(relation.targetEntity);
+        options.recursive = options.recursive || 1;
 
-      let updatedChild = Array.isArray(result[childAttributeName])
-        ? result[childAttributeName].map(child => populator.assign(childEntity, values, child, options.recursive - 1))
-        : populator.assign(childEntity, values, result[childAttributeName], options.recursive - 1);
+        let updatedChild = Array.isArray(result[childAttributeName])
+          ? result[childAttributeName].map(child => populator.assign(childEntity, values, child, options.recursive - 1))
+          : populator.assign(childEntity, values, result[childAttributeName], options.recursive - 1);
 
-      populator.assign(parent.entity, {[childAttributeName]: updatedChild}, result, options.recursive);
+        populator.assign(parent, {[childAttributeName]: updatedChild}, result, options.recursive);
 
-      return manager.flush().then(() => result);
-    });
+        return manager.flush().then(() => result);
+      });
   }
 
   /**
@@ -264,12 +271,14 @@ module.exports = class FootprintService extends Service {
           return Promise.reject(new EntityError('E_NOT_FOUND', 'No record found with the specified criteria.'));
         }
 
-      Array.isArray(result[childAttributeName])
-        ? result[childAttributeName].map(child => manager.remove(child))
-        : manager.remove(result[childAttributeName]);
+        result      = result[0];
+        let manager = this.app.orm.getManager();
 
-      return manager.flush().then(() => result);
+        Array.isArray(result[childAttributeName])
+          ? result[childAttributeName].map(child => manager.remove(child))
+          : manager.remove(result[childAttributeName]);
 
-    });
+        return manager.flush().then(() => result);
+      });
   }
 };
