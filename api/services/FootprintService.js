@@ -18,16 +18,12 @@ module.exports = class FootprintService extends Service {
    *
    * @returns {Promise.<T>}
    */
-  create(modelName, values, options) {
+  create(modelName, values, options = {}) {
     let manager   = this.app.orm.getManager();
     let populator = this.app.orm.getPopulator(manager);
     let entity    = manager.getEntity(modelName);
 
-    if (!entity) {
-      return Promise.reject(new EntityError('E_NOT_FOUND', `No registered entity found for ${modelName}`));
-    }
-
-    let newRecord = populator.assign(entity, values, null, options);
+    let newRecord = populator.assign(entity, values, null, options.recursive);
 
     return manager.persist(newRecord)
       .flush().then(() => newRecord);
@@ -129,14 +125,8 @@ module.exports = class FootprintService extends Service {
    *
    * @returns {Promise<T>|Promise.<Object>}
    */
-  createAssociation(parentModelName, parentId, childAttributeName, values, options) {
-    let manager = this.app.orm.getManager();
-    let parent  = manager.getEntity(parentModelName);
-
-    if (!parent) {
-      return Promise.reject(new EntityError('E_NOT_FOUND', `Entity '${parentModelName}' not found.`));
-    }
-
+  createAssociation(parentModelName, parentId, childAttributeName, values, options = {}) {
+    let manager  = this.app.orm.getManager();
     let mapping  = manager.getMapping(parentModelName);
     let relation = mapping.getRelation(childAttributeName);
 
@@ -157,10 +147,14 @@ module.exports = class FootprintService extends Service {
           return Promise.reject(new EntityError('E_NOT_FOUND', 'No record found with the specified criteria.'));
         }
 
-        let recursive = options && options.recursive ? options.recursive : 1;
-        let child     = this.app.orm.getPopulator(manager).assign(childEntity, values, null, recursive);
+        options.recursive = options.recursive || 1;
 
-        result[childAttributeName].add(child);
+        let child = this.app.orm.getPopulator(manager)
+          .assign(childEntity, values, {}, options.recursive);
+
+        relation.type.includes('ToMany')
+          ? result[childAttributeName].add(child)
+          : result[childAttributeName] = child;
 
         return manager.flush().then(() => result);
       });
@@ -182,18 +176,15 @@ module.exports = class FootprintService extends Service {
    * @returns {Promise<any>|Promise.<{}[]>}
    */
   findAssociation(parentModelName, parentId, childAttributeName, criteria, options = {}) {
-    let manager = this.app.orm.getManager();
-    let parent  = manager.getEntities(parentModelName);
-
-    if (!parent) {
-      return Promise.reject(new EntityError('E_NOT_FOUND', `Entity '${parentModelName}' not found.`));
-    }
-
+    let manager  = this.app.orm.getManager();
     let mapping  = manager.getMapping(parentModelName);
     let relation = mapping.getRelation(childAttributeName);
 
-    if (!relation) {
-      return Promise.reject(new EntityError('E_NOT_FOUND', `Association ${childAttributeName} not found.`));
+    if (relation.type.includes('ToOne')) {
+      let primaryKey = `${mapping.getTableName()}.${mapping.getPrimaryKey()}`;
+
+      return manager.getRepository(parentModelName)
+        .find({[primaryKey]: parentId}, {populate: childAttributeName}, options);
     }
 
     let repository        = manager.getRepository(parentModelName);
@@ -228,23 +219,37 @@ module.exports = class FootprintService extends Service {
    * @returns {Promise.<T>}
    */
   updateAssociation(parentModelName, parentId, childAttributeName, criteria, values, options = {}) {
+    let manager       = this.app.orm.getManager();
+    let relation      = manager.getMapping(parentModelName).getRelation(childAttributeName);
+    let populator     = this.app.orm.getPopulator(manager);
+    let parent        = manager.getEntity(parentModelName);
+    options.recursive = options.recursive || 1;
+
+    if (relation.type.includes('ToOne')) {
+      return manager.getRepository(parentModelName)
+        .findOne(parentId, {populate: childAttributeName})
+        .then(result => {
+          if (!result) {
+            return Promise.reject(new EntityError('E_NOT_FOUND', 'No record found with the specified criteria.'));
+          }
+
+          populator.assign(parent, {[childAttributeName]: values}, result, options.recursive);
+
+          return manager.flush().then(() => result);
+        });
+    }
+
     return this.findAssociation(parentModelName, parentId, childAttributeName, criteria, options)
       .then(result => {
         if (!result) {
           return Promise.reject(new EntityError('E_NOT_FOUND', 'No record found with the specified criteria.'));
         }
 
-        result            = result[0];
-        let manager       = this.app.orm.getManager();
-        let populator     = this.app.orm.getPopulator(manager);
-        let parent        = manager.getEntities(parentModelName);
-        let relation      = manager.getMapping(parentModelName).getRelation(childAttributeName);
-        let childEntity   = manager.getEntity(relation.targetEntity);
-        options.recursive = options.recursive || 1;
-
-        let updatedChild = Array.isArray(result[childAttributeName])
-          ? result[childAttributeName].map(child => populator.assign(childEntity, values, child, options.recursive - 1))
-          : populator.assign(childEntity, values, result[childAttributeName], options.recursive - 1);
+        result           = result[0];
+        let childEntity  = manager.getEntity(relation.targetEntity);
+        let updatedChild = result[childAttributeName].map(child => {
+          return populator.assign(childEntity, values, child, options.recursive);
+        });
 
         populator.assign(parent, {[childAttributeName]: updatedChild}, result, options.recursive);
 
