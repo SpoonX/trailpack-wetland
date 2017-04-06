@@ -1,8 +1,8 @@
 'use strict';
 
 const DatastoreTrailpack = require('trailpack/datastore');
-const path               = require('path');
 const Wetland            = require('wetland').Wetland;
+const Homefront          = require('homefront').Homefront;
 
 module.exports = class WetlandTrailpack extends DatastoreTrailpack {
 
@@ -11,7 +11,12 @@ module.exports = class WetlandTrailpack extends DatastoreTrailpack {
    */
   validate() {
     if (!this.app.config.database || !this.app.config.database.stores) {
-      return this.app.log.logger.warn('No store configured.');
+      return Promise.reject(new Error('No store configured.'));
+    }
+
+    if (!this.app.config.wetland && !this.app.config.database) {
+      return Promise.reject(new Error(`Wetland config not found.
+        Make sure you have a config file for wetland and try again.`));
     }
   }
 
@@ -19,15 +24,15 @@ module.exports = class WetlandTrailpack extends DatastoreTrailpack {
    * Instantiate wetland with config
    */
   configure() {
-    this.app.config.database.orm = 'wetland';
+    let config          = this.app.config;
+    config.database.orm = 'wetland';
+    let databaseConfig  = new Homefront(config.database);
 
-    let wetlandConfig = this.app.config.wetland;
-
-    if (!wetlandConfig) {
-      throw new Error('Wetland config not found. Make sure you have a config file for wetland and try again.');
+    if (config.wetland) {
+      databaseConfig.merge(config.wetland);
     }
 
-    this.wetland = new Wetland(wetlandConfig);
+    this.wetland = new Wetland(databaseConfig);
   }
 
   /**
@@ -39,19 +44,20 @@ module.exports = class WetlandTrailpack extends DatastoreTrailpack {
     this.orm     = this.wetland;
     this.app.orm = this.wetland;
 
-    let migration = this.app.config.database.models.migrate;
+    let config    = this.wetland.getConfig();
+    let migration = config.fetch('migrate') || config.fetch('models.migrate');
 
     if (!migration || migration === 'safe') {
-      return;
+      return Promise.resolve();
     }
 
     if (this.app.config.env !== 'development') {
-      return this.app.log
-        .warn(`Refusing to run dev migrations because environment '${this.app.config.env}' isn't development.`);
+      let message = `Refusing to run dev migrations because environment '${this.app.config.env}' isn't development.`;
+      return Promise.reject(new Error(message));
     }
 
     if (migration !== 'alter') {
-      return this.app.log.warn('Not running dev migrations. The only support method is "alter".');
+      return Promise.reject(new Error('Not running dev migrations. The only support method is "alter".'));
     }
 
     this.app.log.verbose('Starting dev migrations...');
