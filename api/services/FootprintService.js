@@ -2,7 +2,6 @@
 
 const Service     = require('trails-service');
 const EntityError = require('../../lib').EntityError;
-const util        = require('util');
 
 /**
  * @module FootprintService
@@ -151,7 +150,7 @@ module.exports = class FootprintService extends Service {
       return Promise.reject(new EntityError('E_NOT_FOUND', `Entity '${relation.targetEntity}' not found.`));
     }
 
-    return manager.getRepository(parent)
+    return manager.getRepository(parentModelName)
       .findOne(parentId, {populate: childAttributeName})
       .then(result => {
         if (!result) {
