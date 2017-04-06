@@ -3,6 +3,8 @@
 --full-trace
 --no-exit
 --slow 50
---check-leaks
+--ignore-leaks
 --globals app
 --fgrep app.js --invert
+./test/index.js
+./test/**/*.test.js
