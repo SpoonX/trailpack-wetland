@@ -7,7 +7,7 @@ Wetland ORM Trailpack https://wetland.spoonx.org
 1. `npm install --save trailpack-wetland`
 2. Choose an adapter (list below) `npm i --save sqlite3`
 3. `mkdir api/entity`
-4. `touch config/wetland.js`
+4. `echo "module.exports.wetland = {};\n" > config/wetland.js`
 5. `echo "module.exports = require('./config/wetland').wetland;\n" > wetland.js`
 
 ## Configuration
